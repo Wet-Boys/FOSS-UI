@@ -13,6 +13,7 @@ using static RoR2.Chat;
 using System.Linq;
 using LookingGlass.StatsDisplay;
 using RoR2.Skills;
+using Newtonsoft.Json.Utilities;
 
 namespace LookingGlass.ItemStatsNameSpace
 {
@@ -125,12 +126,61 @@ namespace LookingGlass.ItemStatsNameSpace
         void SkillUpdate(Action<SkillIcon> orig, SkillIcon self)
         {
             orig(self);
-            // TODO Change skills description to include proc cof data
-            string desc = Language.GetString(self.targetSkill.skillDescriptionToken);
+            StringBuilder desc = new StringBuilder(Language.GetString(self.targetSkill.skillDescriptionToken));
 
-            if (ProcCoefficientData.hasProcCoefficient(self.targetSkill.skillNameToken)) desc = desc + "\nProc Coefficient: <color=#a6b3bd>" + ProcCoefficientData.GetProcCoefficient(self.targetSkill.skillNameToken) + "</color>\n";
+            if (ProcCoefficientData.hasProcCoefficient(self.targetSkill.skillNameToken))
+                desc.Append("\nProc Coefficient: <style=cStack>").Append((ProcCoefficientData.GetProcCoefficient(self.targetSkill.skillNameToken)).ToString("0.00")).Append("</style>");
 
-            self.tooltipProvider.overrideBodyText = desc;
+            if(self.targetSkill.skillNameToken == "VOIDSURVIVOR_PRIMARY_NAME" || self.targetSkill.skillNameToken == "VOIDSURVIVOR_SECONDARY_NAME")
+                desc.Append("\nProc Coefficient: <style=cIsVoid>").Append((ProcCoefficientData.GetProcCoefficient("CORRUPTED_" + self.targetSkill.skillNameToken)).ToString("0.00")).Append("</style>");
+
+
+
+            CharacterBody body = self.targetSkill.characterBody;
+            
+            int itemCount = 0;
+            ItemStatsDef itemStats;
+            foreach (var item in ItemCatalog.itemDefs)
+            {
+                if (ItemDefinitions.allItemDefinitions.ContainsKey((int)item.itemIndex))
+                {
+                    itemCount = body.inventory.GetItemCount(item.itemIndex);
+                    if (itemCount > 0)
+                    {
+                        itemStats = ItemDefinitions.allItemDefinitions[(int)item.itemIndex];
+                        if (itemStats.hasChance)
+                        {
+                            desc.Append("\n").Append(Language.GetString(item.nameToken)).Append(": <style=cIsDamage>");
+
+                            desc.Append((itemStats.calculateValues(body.master.luck, itemCount, ProcCoefficientData.GetProcCoefficient(self.targetSkill.skillNameToken))[0] * 100).ToString("0.000")).Append("%</style>");
+
+                            if (itemStats.chanceScaling == ItemStatsDef.ChanceScaling.Linear){
+                                desc.Append(" <style=cStack>(");
+                                desc.Append((int)Math.Ceiling(1 / itemStats.calculateValues(0f, 1, ProcCoefficientData.GetProcCoefficient(self.targetSkill.skillNameToken))[0]));
+                                desc.Append(" to cap)</style>");
+                            }
+
+                            if (self.targetSkill.skillNameToken == "VOIDSURVIVOR_PRIMARY_NAME" || self.targetSkill.skillNameToken == "VOIDSURVIVOR_SECONDARY_NAME")
+                            {
+                                // TODO align this text to the one above
+                                desc.Append("\n").Append("<style=cIsVoid>").Append((itemStats.calculateValues(body.master.luck, itemCount, ProcCoefficientData.GetProcCoefficient("CORRUPTED_" + self.targetSkill.skillNameToken))[0] * 100).ToString("0.000")).Append("%</style>");
+
+                                if (itemStats.chanceScaling == ItemStatsDef.ChanceScaling.Linear)
+                                {
+                                    desc.Append(" <style=cStack>(");
+                                    desc.Append((int)Math.Ceiling(1 / itemStats.calculateValues(0f, 1, ProcCoefficientData.GetProcCoefficient("CORRUPTED_" + self.targetSkill.skillNameToken))[0]));
+                                    desc.Append(" to cap)</style>");
+                                }
+                            }
+                        }
+                    }
+                }
+                
+            }
+
+
+
+            self.tooltipProvider.overrideBodyText = desc.ToString();
         }
         internal static void SetDescription(ItemIcon self, ItemIndex newItemIndex, int newItemCount)
         {
@@ -166,7 +216,12 @@ namespace LookingGlass.ItemStatsNameSpace
                     {
                         master = LocalUserManager.GetFirstLocalUser().cachedMaster;
                     }
-                    List<float> values = itemStats.calculateValues(master, newItemCount);
+                    float luck = 0f;
+                    if (master != null)
+                    {
+                        luck = master.luck;
+                    }
+                    List<float> values = itemStats.calculateValues(luck, newItemCount, 1f);
                     if (values is not null)
                     {
                         for (int i = 0; i < itemStats.descriptions.Count; i++)
